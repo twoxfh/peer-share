@@ -23,9 +23,10 @@ export default class FileTransfer {
     this.readController = null;
     this.getChunk = null;
     this.connection.on('data', data => {
-      console.log('recived data', data);
+      console.log('recived data', data, this);
       if (this.mode === 'idle') {
         const { filename, size } = data as IdleData;
+        this.mode = 'recive';
         const stream = new ReadableStream({
           start: controller => {
             this.readController = controller;
@@ -34,7 +35,6 @@ export default class FileTransfer {
         });
         const writer = streamSaver.createWriteStream(filename, { size });
         stream.pipeTo(writer);
-        this.mode = 'recive';
       } else if (this.mode === 'recive') {
         if (!this.readController) throw new Error("Don't send data before get");
         const message = data as ReciveData;
