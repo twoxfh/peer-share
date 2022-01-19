@@ -7,10 +7,7 @@
   let id = '';
   peer.on('open', i => console.log((id = i)));
   let connection: Peer.DataConnection;
-  peer.on('connection', conn => {
-    console.log(conn);
-    conn.on('open', () => (connection = conn));
-  });
+  peer.on('connection', conn => conn.on('open', () => (connection = conn)));
   window.addEventListener('beforeunload', _ => peer.destroy());
   peer.on('error', e => console.error(e));
 </script>

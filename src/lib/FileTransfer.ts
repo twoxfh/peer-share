@@ -1,90 +1,91 @@
 import type Peer from 'peerjs';
 import streamSaver from 'streamsaver';
+import { getChunkIter } from './blobChunker';
+import getLock from './Lock';
 streamSaver.mitm = 'https://vigneshpa.github.io/stream-saver-mitm/';
 
-type IdleData = {
-  filename: string;
-  size: number;
-};
-
-type ReciveData = ArrayBuffer | 'stop';
-
-type SendData = 'get' | 'stopped';
-
 export default class FileTransfer {
+  reqres: ReqRes<FileTransfer['requestHandler']>;
+  streamPull: (() => Promise<ArrayBuffer | 'stop'>) | null;
+  constructor(public connection: Peer.DataConnection) {
+    this.reqres = new ReqRes(connection, this.requestHandler.bind(this));
+    this.streamPull = null;
+  }
+  async requestHandler(message: {
+    filename: string;
+    size: number;
+  }): Promise<'accepted' | 'canceled'>;
+  async requestHandler(message: 'stream-pull'): Promise<ArrayBuffer | 'stop'>;
+  async requestHandler(message: any): Promise<any> {
+    if (message === 'stream-pull') {
+      if (!this.streamPull) throw new Error('Currently not streaming');
+      return await this.streamPull();
+    }
+    if (message.filename) {
+      const { filename, size } = message;
+      if (!confirm('Do you want to download\n' + filename)) return 'canceled';
+      const ft = this;
+      const readable = new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          const data = await ft.reqres.request('stream-pull');
+          if (data === 'stop') controller.close();
+          else controller.enqueue(new Uint8Array(data));
+        },
+      });
+      const writable = streamSaver.createWriteStream(filename, { size });
+      readable.pipeTo(writable);
+      return 'accepted';
+    }
+  }
+  async sendFile(file: File) {
+    if (this.streamPull) throw new Error('Already streaming another file');
+    const response = await this.reqres.request({ filename: file.name, size: file.size });
+    if (response === 'accepted') {
+      const iter = getChunkIter(file);
+      this.streamPull = async () => {
+        const { value, done } = await iter.next();
+        if (value) return value;
+        if (done) {
+          this.streamPull = null;
+          return 'stop';
+        }
+        throw new Error('No value got');
+      };
+    }
+  }
+}
+
+class ReqRes<T extends (message: any) => Promise<any>> {
   connection: Peer.DataConnection;
-  mode: 'idle' | 'send' | 'recive';
-  readController: ReadableStreamDefaultController | null;
-  getChunk: (() => Promise<{ value: ArrayBuffer | null; done: boolean }>) | null;
-  constructor(conn: Peer.DataConnection) {
-    console.log('Attaching file transfer object to ', conn);
+  resolver: ((data: any) => void) | null;
+  constructor(conn: Peer.DataConnection, requestHandler: T) {
+    console.log('Attaching reqres handler to ', conn);
     this.connection = conn;
-    this.mode = 'idle';
-    this.readController = null;
-    this.getChunk = null;
-    this.connection.on('data', data => {
-      console.log('recived data', data, this);
-      if (this.mode === 'idle') {
-        const { filename, size } = data as IdleData;
-        this.mode = 'recive';
-        const stream = new ReadableStream({
-          start: controller => {
-            this.readController = controller;
-            this.connection.send('get');
-          },
-        });
-        const writer = streamSaver.createWriteStream(filename, { size });
-        stream.pipeTo(writer);
-      } else if (this.mode === 'recive') {
-        if (!this.readController) throw new Error("Don't send data before get");
-        const message = data as ReciveData;
-        if (typeof message === 'string') {
-          this.readController.close();
-          this.readController = null;
-          this.connection.send('stopped');
-          this.mode = 'idle';
-        } else {
-          this.readController.enqueue(new Uint8Array(message));
-          this.connection.send('get');
-        }
-      } else if (this.mode === 'send') {
-        const message = data as SendData;
-        if (message === 'get') {
-          this.getChunk!().then(({ value, done }) => {
-            if (value) {
-              this.connection.send(value);
-            }
-            if (done) {
-              this.connection.send('stop');
-            }
-          });
-        } else if (message === 'stopped') {
-          this.getChunk = null;
-          this.mode = 'idle';
-        }
+    this.resolver = null;
+    this.connection.on('data', async data => {
+      console.log(data);
+      if (data.response) {
+        this.resolver!(data.message);
+      }
+      if (data.request) {
+        console.log('Locked for request', data.message);
+        const lock = await getLock();
+        const res = await requestHandler(data.message);
+        this.connection.send({ response: true, message: res });
+        lock.releaseLock();
       }
     });
+    this.request = (async (message: any) => {
+      console.log('Locked for request', message);
+      const lock = await getLock();
+      return new Promise(resolve => {
+        this.connection.send({ request: true, message });
+        this.resolver = data => {
+          lock.releaseLock();
+          resolve(data);
+        };
+      });
+    }) as any;
   }
-  sendFile(file: File) {
-    if (this.mode !== 'idle') throw new Error('This connection is not idle');
-    const chunkSize = 10 * 1024 * 1024;
-    let currentPos = 0;
-    let nextDone = false;
-    this.getChunk = async () => {
-      const done = nextDone;
-      let value: ArrayBuffer | null = null;
-      if (!done) {
-        if (currentPos + chunkSize <= file.size) {
-          value = await file.slice(currentPos, currentPos + chunkSize).arrayBuffer();
-          currentPos += chunkSize;
-        } else {
-          value = await file.slice(currentPos).arrayBuffer();
-          nextDone = true;
-        }
-      }
-      return { value, done };
-    };
-    this.mode = 'send';
-    this.connection.send({ filename: file.name, size: file.size } as IdleData);
-  }
+  request: T;
 }
