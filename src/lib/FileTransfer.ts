@@ -59,16 +59,13 @@ class ReqRes<T extends (message: any) => Promise<any>> {
   connection: Peer.DataConnection;
   resolver: ((data: any) => void) | null;
   constructor(conn: Peer.DataConnection, requestHandler: T) {
-    console.log('Attaching reqres handler to ', conn);
     this.connection = conn;
     this.resolver = null;
     this.connection.on('data', async data => {
-      console.log(data);
       if (data.response) {
         this.resolver!(data.message);
       }
       if (data.request) {
-        console.log('Locked for request', data.message);
         const lock = await getLock();
         const res = await requestHandler(data.message);
         this.connection.send({ response: true, message: res });
@@ -76,7 +73,6 @@ class ReqRes<T extends (message: any) => Promise<any>> {
       }
     });
     this.request = (async (message: any) => {
-      console.log('Locked for request', message);
       const lock = await getLock();
       return new Promise(resolve => {
         this.connection.send({ request: true, message });
