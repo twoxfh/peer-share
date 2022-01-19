@@ -11,7 +11,7 @@
   async function send() {
     for (let file of files) {
       ft.sendFile(file);
-      alert('Sent file ' + file.name);
+      // alert('Sent file ' + file.name);
     }
   }
 </script>
