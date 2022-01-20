@@ -1,29 +1,31 @@
-const chunkSize = 5 * 1024 * 1024;
-export function getNumberOfChunks(size: number) {
-  return Math.ceil(size / chunkSize);
-}
-export async function getChunk(blob: Blob, chunkNumber: number, noc?: number) {
-  const noOfChunks = noc ?? getNumberOfChunks(blob.size);
-  if (chunkNumber >= noOfChunks) throw new Error('Chunk out of bounds');
-  if (chunkNumber !== noOfChunks - 1)
-    return await blob.slice(chunkNumber * chunkSize, (chunkNumber + 1) * chunkSize).arrayBuffer();
-  else return await blob.slice(chunkNumber * chunkSize).arrayBuffer();
+import { writable } from 'svelte/store';
+export const chunkSize = writable(5 * 1024 * 1024);
+let csize: number = 5 * 1024 * 1024;
+chunkSize.subscribe(value => (csize = value));
+
+export async function getChunk(blob: Blob, chunkFrom: number) {
+  const from = chunkFrom;
+  chunkFrom += csize;
+  if (chunkFrom >= blob.size) chunkFrom = blob.size;
+  return { chunkFrom, value: await blob.slice(from, chunkFrom).arrayBuffer() };
 }
 export async function* getChunkIter(blob: Blob) {
-  const noOfChunks = getNumberOfChunks(blob.size);
-  for (let i = 0; i < noOfChunks; i++) {
-    yield await getChunk(blob, i, noOfChunks);
+  for (let i = 0; i < blob.size; ) {
+    const { value, chunkFrom } = await getChunk(blob, i);
+    i = chunkFrom;
+    yield value;
   }
 }
 export function getStream(blob: Blob) {
-  const noOfChunks = getNumberOfChunks(blob.size);
   let i: number;
   return new ReadableStream<ArrayBuffer>({
     start() {
       i = 0;
     },
     async pull(controller) {
-      if (i < noOfChunks) controller.enqueue(await getChunk(blob, i++, noOfChunks));
+      const { value, chunkFrom } = await getChunk(blob, i);
+      i = chunkFrom;
+      if (i < blob.size) controller.enqueue(value);
       else controller.close();
     },
   });
