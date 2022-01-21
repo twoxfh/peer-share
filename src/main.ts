@@ -1,11 +1,8 @@
 import App from './App.svelte';
-import ponyfill from './ponyfill';
-function mount() {
-  window.app = new App({
-    target: document.body,
-  });
-}
-ponyfill().then(mount);
+window.app = new App({
+  target: document.body,
+});
+
 export default window.app;
 declare global {
   interface Window {
