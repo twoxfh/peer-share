@@ -9,7 +9,7 @@
     if (con) remoteId = con;
     let conn = peer.connect(remoteId, { reliable: true, serialization: 'binary' });
     conn.on('open', () => (connection = conn));
-    window.location.hash = '';
+    history.replaceState(null, document.title, window.location.pathname);
   }
   if (window.location.hash) {
     const hash = window.location.hash.substring(1);
