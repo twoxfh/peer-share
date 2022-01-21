@@ -9,6 +9,22 @@ export function saveBlob(filename: string, blob: Blob) {
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url));
 }
+
+export function streamToBlob(stream: ReadableStream<Uint8Array>): Promise<Blob> {
+  const chunks: Blob[] = [];
+  return new Promise<Blob>(async resolve => {
+    const reader = stream.getReader();
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        resolve(new Blob(chunks));
+        return;
+      }
+      chunks.push(new Blob([value!]));
+    }
+  });
+}
+
 /**
  * Format bytes as human-readable text.
  *

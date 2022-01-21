@@ -1,7 +1,7 @@
 import type Peer from 'peerjs';
 import { getChunkIter } from './blobChunker';
 import getLock from './Lock';
-import { saveBlob } from './utils';
+import { saveBlob, streamToBlob } from './utils';
 // import streamSaver from 'streamsaver';
 // streamSaver.mitm = 'https://vigneshpa.github.io/stream-saver-mitm/';
 
@@ -40,7 +40,7 @@ export default class FileTransfer {
       if (!confirm('Do you want to download\n' + filename)) return 'canceled';
       const ft = this;
       let loaded = 0;
-      const body = new ReadableStream<Uint8Array>({
+      const stream = new ReadableStream<Uint8Array>({
         async pull(controller) {
           const data = await ft.reqres.request('stream-pull');
           if (data === 'stop') controller.close();
@@ -53,8 +53,7 @@ export default class FileTransfer {
         },
       });
       // const writable = streamSaver.createWriteStream(filename, { size });
-      const res = new Response(body);
-      res.blob().then(value => saveBlob(filename, value));
+      streamToBlob(stream).then(value => saveBlob(filename, value));
       return 'accepted';
     }
   }
